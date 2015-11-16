@@ -18,6 +18,7 @@
 
 #define DICT_SIZE 128
 #define BLOCK_SIZE 8
+#define NUM_LETTERS (0x0F + 1)
 
 #define DELAY() do { \
     uint32_t delay = 0x2ffff; \
@@ -45,12 +46,13 @@ struct msg_dict {
     CHAN_FIELD_ARRAY(node_t, dict, DICT_SIZE);
 };
 
-struct msg_root {
-    CHAN_FIELD_ARRAY(node_t, dict, 1); // like, dict, but only with root node
+struct msg_roots {
+    CHAN_FIELD_ARRAY(node_t, dict, NUM_LETTERS); // like, dict, but only with root nodes
 };
 
 struct msg_compressed_data {
     CHAN_FIELD_ARRAY(node_t, compressed_data, BLOCK_SIZE);
+    CHAN_FIELD(unsigned, sample_count);
 };
 
 struct msg_index {
@@ -59,6 +61,11 @@ struct msg_index {
 
 struct msg_parent {
     CHAN_FIELD(index_t, parent);
+};
+
+struct msg_compress {
+    CHAN_FIELD(index_t, parent);
+    CHAN_FIELD(unsigned, sample_count);
 };
 
 struct msg_sibling {
@@ -75,6 +82,13 @@ struct msg_self_sibling {
 struct msg_letter {
     CHAN_FIELD(letter_t, letter);
 };
+
+struct msg_self_letter {
+    SELF_CHAN_FIELD(index_t, letter);
+};
+#define FIELD_INIT_msg_self_letter {\
+    SELF_FIELD_INITIALIZER \
+}
 
 struct msg_parent_node {
     CHAN_FIELD(node_t, parent_node);
@@ -120,31 +134,48 @@ struct msg_symbol {
     CHAN_FIELD(index_t, symbol);
 };
 
-TASK(1, task_init)
-TASK(2, task_sample)
-TASK(3, task_compress)
-TASK(4, task_find_sibling)
-TASK(5, task_add_node)
-TASK(6, task_add_insert)
-TASK(7, task_append_compressed)
-TASK(8, task_print)
+struct msg_sample_count {
+    CHAN_FIELD(unsigned, sample_count);
+};
 
-CHANNEL(task_init, task_compress, msg_parent);
-CHANNEL(task_init, task_find_sibling, msg_root);
-MULTICAST_CHANNEL(msg_root, ch_root, task_init,
-                  task_compress, msg_root);
-CHANNEL(task_init, task_add_insert, msg_node_count);
+struct msg_self_sample_count {
+    SELF_CHAN_FIELD(index_t, sample_count);
+};
+#define FIELD_INIT_msg_self_sample_count {\
+    SELF_FIELD_INITIALIZER \
+}
+
+TASK(1, task_init)
+TASK(2, task_init_dict)
+TASK(3, task_sample)
+TASK(4, task_compress)
+TASK(5, task_find_sibling)
+TASK(6, task_add_node)
+TASK(7, task_add_insert)
+TASK(8, task_append_compressed)
+TASK(9, task_print)
+
+CHANNEL(task_init, task_init_dict, msg_letter);
+CHANNEL(task_init, task_sample, msg_letter);
+CHANNEL(task_init, task_compress, msg_compress);
+SELF_CHANNEL(task_init_dict, msg_self_letter);
+MULTICAST_CHANNEL(msg_roots, ch_roots, task_init_dict,
+                  task_find_sibling, task_add_node);
 CHANNEL(task_init, task_append_compressed, msg_out_len);
+CHANNEL(task_init_dict, task_add_insert, msg_node_count);
 MULTICAST_CHANNEL(msg_dict, ch_dict, task_add_insert,
                   task_compress, task_find_sibling, task_add_node);
 MULTICAST_CHANNEL(msg_letter, ch_letter, task_sample,
                   task_find_sibling, task_add_insert);
+SELF_CHANNEL(task_sample, msg_self_letter);
 CHANNEL(task_compress, task_add_insert, msg_parent_info);
 CHANNEL(task_compress, task_find_sibling, msg_child);
+CHANNEL(task_compress, task_append_compressed, msg_sample_count);
 MULTICAST_CHANNEL(msg_parent, ch_parent, task_compress,
                   task_add_insert, task_append_compressed);
 MULTICAST_CHANNEL(msg_sibling, ch_sibling, task_compress,
                   task_find_sibling, task_add_node);
+SELF_CHANNEL(task_compress, msg_self_sample_count);
 CHANNEL(task_find_sibling, task_compress, msg_parent);
 SELF_CHANNEL(task_find_sibling, msg_self_sibling);
 SELF_CHANNEL(task_add_node, msg_self_sibling);
@@ -153,6 +184,7 @@ SELF_CHANNEL(task_add_insert, msg_self_node_count);
 CHANNEL(task_add_insert, task_append_compressed, msg_symbol);
 SELF_CHANNEL(task_append_compressed, msg_self_out_len);
 CHANNEL(task_append_compressed, task_print, msg_compressed_data);
+CHANNEL(task_append_compressed, task_compress, msg_sample_count);
 
 void init()
 {
@@ -175,45 +207,90 @@ void init()
     PRINTF(".%u.\r\n", curctx->task->idx);
 }
 
+static letter_t acquire_sample(letter_t prev_sample)
+{
+    // TODO: replace with temp sensor reading
+    //letter_t sample = rand() & 0x0F;
+    letter_t sample = (prev_sample + 1) & 0x03;
+    return sample;
+}
+
 void task_init()
 {
     TASK_PROLOGUE();
     LOG("init\r\n");
 
-    index_t root = ROOT_IDX;
-    node_t root_node = {
-        .letter = 0, // undefined
-        .sibling = NIL, // no siblings ever
-        .child = NIL, // init an empty list for children
-    };
-    CHAN_OUT1(index_t, dict[ROOT_IDX], root_node,
-              MC_OUT_CH(ch_root, task_init, task_compress, task_add_node));
+    // Initialize the pointer into the dictionary to one of the root nodes
+    letter_t sample = acquire_sample(0);
+    index_t parent = (index_t)sample;
+    CHAN_OUT1(index_t, parent, parent, CH(task_init, task_compress));
 
-    // Assume that all data starts with a fixed letter (0). This
-    // removes the need to have an out-of-band call to sample.
-    index_t prefix_letter_index = 0;
-    CHAN_OUT1(index_t, parent, prefix_letter_index, CH(task_init, task_compress));
-
-    index_t node_count = 1; // count root node
-    CHAN_OUT1(index_t, node_count, node_count, CH(task_init, task_add_insert));
+    LOG("init: start parent %u\r\n", parent);
 
     index_t out_len = 0;
     CHAN_OUT1(index_t, out_len, out_len, CH(task_init, task_append_compressed));
 
-    TRANSITION_TO(task_sample);
+    letter_t letter = 0;
+    CHAN_OUT1(letter_t, letter, letter, CH(task_init, task_init_dict));
+    CHAN_OUT1(letter_t, letter, letter, CH(task_init, task_sample));
+
+    unsigned sample_count = 0;
+    CHAN_OUT1(unsigned, sample_count, sample_count,
+              CH(task_init, task_compress));
+
+    TRANSITION_TO(task_init_dict);
+}
+
+void task_init_dict()
+{
+    letter_t letter = *CHAN_IN2(letter_t, letter,
+                                CH(task_init, task_init_dict),
+                                SELF_IN_CH(task_init_dict));
+
+    LOG("init dict: letter %u\r\n", letter);
+
+    node_t node = {
+        .letter = letter,
+        .sibling = NIL, // no siblings for 'root' nodes
+        .child = NIL, // init an empty list for children
+    };
+
+    CHAN_OUT1(node_t, dict[letter], node,
+              MC_OUT_CH(ch_roots, task_init_dict,
+                        task_find_sibling, task_add_node));
+
+    letter++;
+
+    if (letter < NUM_LETTERS) {
+        CHAN_OUT1(letter_t, letter, letter, SELF_OUT_CH(task_init_dict));
+        TRANSITION_TO(task_init_dict);
+    } else {
+        index_t node_count = NUM_LETTERS;
+        CHAN_OUT1(index_t, node_count, node_count, CH(task_init_dict, task_add_insert));
+
+        TRANSITION_TO(task_sample);
+    } 
 }
 
 void task_sample()
 {
     TASK_PROLOGUE();
 
-    letter_t sample = rand() & 0x0F; // TODO: replace with temp sensor reading
+    // TODO: this is for testing only
+    letter_t prev_sample = *CHAN_IN2(letter_t, letter,
+                                     CH(task_init, task_sample),
+                                     SELF_IN_CH(task_sample));
+
+    letter_t sample = acquire_sample(prev_sample);
 
     LOG("sample: %u\r\n", sample);
 
     CHAN_OUT1(letter_t, letter, sample,
               MC_OUT_CH(ch_letter, task_sample,
                         task_find_sibling, task_add_insert));
+
+    prev_sample = sample;
+    CHAN_OUT1(letter_t, letter, prev_sample, SELF_OUT_CH(task_sample));
 
     TRANSITION_TO(task_compress);
 }
@@ -231,24 +308,14 @@ void task_compress()
 
     LOG("compress: parent %u\r\n", parent);
 
-    // We special-case the root for optimization reason:
-    // (1) to avoid having to allocate a whole array for the init->find_sibling
-    // channel, of which only root would be ever used, and (2) to avoid having
-    // to sync for every non-root node. If it weren't for (1), we would
-    // probably forgo the optimization, and sync for sake of code simplicity.
-    // But (1) is too costly.
-    if (parent == ROOT_IDX) {
-        // NOTE: we still need to sync for root because root is subject
-        // to modification as children are added, just like any other node.
-        // NOTE: init->find_sibling channel has allocated array field of size 1
+    // See notes about this split in task_add_node. It's a memory optimization.
+    if (parent < NUM_LETTERS) {
         parent_node = *CHAN_IN2(node_t, dict[parent],
-                                       MC_IN_CH(ch_root, task_init, task_compress),
-                                       MC_IN_CH(ch_dict, task_add_insert,
-                                                task_compress));
-    } else { // normal case
+                             MC_IN_CH(ch_roots, task_init_dict, task_compress),
+                             MC_IN_CH(ch_dict, task_add_insert, task_compress));
+    } else {
         parent_node = *CHAN_IN1(node_t, dict[parent],
-                                MC_IN_CH(ch_dict, task_add_insert,
-                                         task_compress));
+                             MC_IN_CH(ch_dict, task_add_insert, task_compress));
     }
 
     LOG("compress: parent node: l %u s %u c %u\r\n",
@@ -273,12 +340,23 @@ void task_compress()
 
     CHAN_OUT1(index_t, child, parent_node.child, CH(task_compress, task_find_sibling));
 
+    unsigned sample_count = *CHAN_IN3(unsigned, sample_count,
+                                      CH(task_init, task_compress),
+                                      SELF_IN_CH(task_compress),
+                                      CH(task_append_compressed, task_compress)); 
+    sample_count++;
+    CHAN_OUT2(unsigned, sample_count, sample_count,
+              SELF_OUT_CH(task_compress),
+              CH(task_compress, task_append_compressed));
+
     TRANSITION_TO(task_find_sibling);
 }
 
 void task_find_sibling()
 {
     DELAY();
+
+    node_t *sibling_node;
 
     index_t sibling = *CHAN_IN2(index_t, sibling,
                          MC_IN_CH(ch_sibling, task_compress, task_find_sibling),
@@ -292,13 +370,21 @@ void task_find_sibling()
 
     if (sibling != NIL) {
 
-        node_t *sibling_node = CHAN_IN1(node_t, dict[sibling],
-                                MC_IN_CH(ch_dict, task_add_insert, task_find_sibling));
+        // See comments in task_add_node about this split. It's a memory optimization.
+        if (sibling < NUM_LETTERS) {
+            sibling_node = CHAN_IN2(node_t, dict[sibling],
+                                    MC_IN_CH(ch_roots, task_init_dict, task_find_sibling),
+                                    MC_IN_CH(ch_dict, task_add_insert, task_find_sibling));
+        } else {
+            sibling_node = CHAN_IN1(node_t, dict[sibling],
+                                    MC_IN_CH(ch_dict, task_add_insert, task_find_sibling));
+        }
 
-        LOG("find sibling: l %u, sn: l %u s %u %c\r\n", letter,
+        LOG("find sibling: l %u, sn: l %u s %u c %u\r\n", letter,
             sibling_node->letter, sibling_node->sibling, sibling_node->child);
 
         if (sibling_node->letter == letter) { // found
+            LOG("find sibling: found %u\r\n", sibling);
             CHAN_OUT1(index_t, parent, sibling,
                       CH(task_find_sibling, task_compress));
             TRANSITION_TO(task_sample);
@@ -338,12 +424,26 @@ void task_add_node()
 {
     TASK_PROLOGUE();
 
+    node_t *sibling_node;
+
     index_t sibling = *CHAN_IN2(index_t, sibling,
                             MC_IN_CH(ch_sibling, task_compress, task_add_node),
                             SELF_IN_CH(task_add_node));
 
-    node_t *sibling_node = CHAN_IN1(node_t, dict[sibling],
-                             MC_IN_CH(ch_dict, task_add_insert, task_add_node));
+    // This split is a memory optimization. It is to avoid having the
+    // channel from init task allocate memory for the whole dict, and
+    // instead to hold only the ones it actually modifies.
+    //
+    // NOTE: the init nodes do not come exclusively from the init task,
+    // because they might be later modified.
+    if (sibling < NUM_LETTERS) {
+        sibling_node = CHAN_IN2(node_t, dict[sibling],
+                                MC_IN_CH(ch_roots, task_init_dict, task_add_node),
+                                MC_IN_CH(ch_dict, task_add_insert, task_add_node));
+    } else {
+        sibling_node = CHAN_IN1(node_t, dict[sibling],
+                                MC_IN_CH(ch_dict, task_add_insert, task_add_node));
+    }
 
     LOG("add node: s %u, sn: l %u s %u c %u\r\n", sibling,
         sibling_node->letter, sibling_node->sibling, sibling_node->child);
@@ -374,7 +474,7 @@ void task_add_insert()
     TASK_PROLOGUE();
 
     index_t node_count = *CHAN_IN2(index_t, node_count,
-                              CH(task_init, task_add_insert),
+                              CH(task_init_dict, task_add_insert),
                               SELF_IN_CH(task_add_insert));
 
     LOG("add insert: nodes %u\r\n", node_count);
@@ -486,6 +586,15 @@ void task_append_compressed()
 
     if (out_len == BLOCK_SIZE) {
         out_len = 0;
+        unsigned sample_count = *CHAN_IN1(unsigned, sample_count,
+                                          CH(task_compress, task_append_compressed));
+        CHAN_OUT1(unsigned, sample_count, sample_count,
+                  CH(task_append_compressed, task_print));
+
+        sample_count = 0; // reset counter
+        CHAN_OUT1(unsigned, sample_count, sample_count,
+                  CH(task_append_compressed, task_compress));
+
         CHAN_OUT1(unsigned, out_len, out_len,
                   SELF_OUT_CH(task_append_compressed));
         TRANSITION_TO(task_print);
@@ -503,6 +612,9 @@ void task_print()
 
     unsigned i;
 
+    unsigned sample_count = *CHAN_IN1(unsigned, sample_count,
+                                      CH(task_append_compressed, task_print));
+
     BLOCK_PRINTF_BEGIN();
     BLOCK_PRINTF("compressed block: ");
     for (i = 0; i < BLOCK_SIZE; ++i) {
@@ -511,6 +623,7 @@ void task_print()
         BLOCK_PRINTF("%04u ", index);
     }
     BLOCK_PRINTF("\r\n");
+    BLOCK_PRINTF("rate: samples/block: %u/%u\r\n", sample_count, BLOCK_SIZE);
     BLOCK_PRINTF_END();
 
     TRANSITION_TO(task_sample);
