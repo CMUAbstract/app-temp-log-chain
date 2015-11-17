@@ -209,10 +209,33 @@ void init()
 
 static letter_t acquire_sample(letter_t prev_sample)
 {
-    // TODO: replace with temp sensor reading
+#ifdef TEST_SAMPLE_DATA
     //letter_t sample = rand() & 0x0F;
     letter_t sample = (prev_sample + 1) & 0x03;
     return sample;
+#else
+    ADC12CTL0 &= ~ADC12ENC; // disable conversion so we can set control bits
+    ADC12CTL0 = ADC12SHT0_2 + ADC12ON; // sampling time, ADC12 on
+    ADC12CTL1 = ADC12SHP + ADC12CONSEQ_0; // use sampling timer, single-channel, single-conversion
+
+    ADC12CTL3 &= ADC12TCMAP; // enable temperature sensor
+    ADC12MCTL0 = ADC12INCH_30; // temp sensor
+
+    ADC12CTL0 |= ADC12ENC; // enable ADC
+
+    // Trigger
+    ADC12CTL0 &= ~ADC12SC;  // 'start conversion' bit must be toggled
+    ADC12CTL0 |= ADC12SC; // start conversion
+
+    while (ADC12CTL1 & ADC12BUSY); // wait for conversion to complete
+
+    ADC12CTL3 &= ~ADC12TCMAP; // disable temperature sensor
+
+    sample_t sample = ADC12MEM0;
+    LOG("sample: %04x\r\n", sample);
+
+    return sample;
+#endif
 }
 
 void task_init()
