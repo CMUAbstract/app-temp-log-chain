@@ -20,6 +20,11 @@
 #define DICT_SIZE         512
 #define BLOCK_SIZE         64
 
+#if 0 // These are largest Mementos with volatile vars can handle
+#define DICT_SIZE         280
+#define BLOCK_SIZE         16
+#endif
+
 #define NUM_LETTERS_IN_SAMPLE        2
 #define LETTER_MASK             0x00FF
 #define LETTER_SIZE_BITS             8
