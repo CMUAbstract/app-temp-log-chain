@@ -14,7 +14,6 @@
 #include "pins.h"
 
 #define NIL 0 // like NULL, but for indexes, not real pointers
-#define ROOT_IDX 0 // index of the root node in the dictionary tree
 
 #define DICT_SIZE 128
 #define BLOCK_SIZE 8
@@ -537,12 +536,7 @@ void task_add_insert()
               MC_OUT_CH(ch_dict, task_add_insert,
                         task_compress, task_find_sibling, task_add_node));
 
-    // A shortcut instead of initializing dict explicitly, i.e. by adding
-    // each letter as a child to the root. In the shortcut version, if we're
-    // adding an child to root here, then, in an initialized table, this child
-    // would have been the leaf (what we call 'parent' here). The leaf index
-    // is the compressed symbol.
-    index_t symbol = parent == ROOT_IDX ? child : parent;
+    index_t symbol = parent;
 
     CHAN_OUT1(index_t, symbol, symbol,
               CH(task_add_insert, task_append_compressed));
