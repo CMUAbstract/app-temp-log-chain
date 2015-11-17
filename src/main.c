@@ -355,7 +355,7 @@ void task_compress()
 
 void task_find_sibling()
 {
-    DELAY();
+    TASK_PROLOGUE();
 
     node_t *sibling_node;
 
