@@ -481,22 +481,10 @@ void task_add_insert()
 
     if (node_count == DICT_SIZE) { // wipe the table if full
 
-        LOG("add insert: dict full\r\n");
+        PRINTF("add insert: dict full\r\n");
 
-        // ... reset node count
-        node_count = 1; // count root node
-
-        // ... init root node
-        node_t root_node = {
-            .letter = 0, // undefined
-            .sibling = NIL, // no siblings ever
-            .child = NIL, // init an empty list for children
-        };
-        CHAN_OUT1(node_t, dict[ROOT_IDX], root_node,
-                  MC_OUT_CH(ch_dict, task_add_insert,
-                            task_compress, task_find_sibling, task_add_node));
-
-        TRANSITION_TO(task_append_compressed);
+        // TODO: clear table  (re-initialize root nodes)
+        while (1);
     }
 
     index_t parent = *CHAN_IN1(index_t, parent,
