@@ -231,9 +231,11 @@ void task_init()
 
     letter_t letter = 0;
     CHAN_OUT1(letter_t, letter, letter, CH(task_init, task_init_dict));
-    CHAN_OUT1(letter_t, letter, letter, CH(task_init, task_sample));
 
-    unsigned sample_count = 0;
+    letter_t prev_sample = sample;
+    CHAN_OUT1(letter_t, letter, prev_sample, CH(task_init, task_sample));
+
+    unsigned sample_count = 1; // count the initial sample (see above)
     CHAN_OUT1(unsigned, sample_count, sample_count,
               CH(task_init, task_compress));
 
@@ -566,7 +568,7 @@ void task_append_compressed()
     CHAN_OUT1(index_t, compressed_data[out_len], symbol,
               CH(task_append_compressed, task_print));
 
-    if (out_len == BLOCK_SIZE) {
+    if (++out_len == BLOCK_SIZE) {
         out_len = 0;
         unsigned sample_count = *CHAN_IN1(unsigned, sample_count,
                                           CH(task_compress, task_append_compressed));
@@ -581,7 +583,6 @@ void task_append_compressed()
                   SELF_OUT_CH(task_append_compressed));
         TRANSITION_TO(task_print);
     } else {
-        out_len++;
         CHAN_OUT1(unsigned, out_len, out_len,
                   SELF_OUT_CH(task_append_compressed));
         TRANSITION_TO(task_sample);
