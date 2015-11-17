@@ -153,6 +153,7 @@ TASK(6, task_add_node)
 TASK(7, task_add_insert)
 TASK(8, task_append_compressed)
 TASK(9, task_print)
+TASK(10, task_done)
 
 CHANNEL(task_init, task_init_dict, msg_letter);
 CHANNEL(task_init, task_sample, msg_letter);
@@ -609,7 +610,13 @@ void task_print()
     BLOCK_PRINTF("rate: samples/block: %u/%u\r\n", sample_count, BLOCK_SIZE);
     BLOCK_PRINTF_END();
 
-    TRANSITION_TO(task_sample);
+    //TRANSITION_TO(task_sample); // restart app
+    TRANSITION_TO(task_done); // for now just do one block
+}
+
+void task_done()
+{
+    TRANSITION_TO(task_done);
 }
 
 ENTRY_TASK(task_init)
