@@ -600,11 +600,13 @@ void task_print()
                                       CH(task_append_compressed, task_print));
 
     BLOCK_PRINTF_BEGIN();
-    BLOCK_PRINTF("compressed block: ");
+    BLOCK_PRINTF("compressed block:\r\n");
     for (i = 0; i < BLOCK_SIZE; ++i) {
         index_t index = *CHAN_IN1(index_t, compressed_data[i],
                                   CH(task_append_compressed, task_print));
-        BLOCK_PRINTF("%04u ", index);
+        BLOCK_PRINTF("%04x ", index);
+        if (i > 0 && (i + 1) % 8 == 0)
+            BLOCK_PRINTF("\r\n");
     }
     BLOCK_PRINTF("\r\n");
     BLOCK_PRINTF("rate: samples/block: %u/%u\r\n", sample_count, BLOCK_SIZE);
