@@ -17,12 +17,13 @@
 
 #define NIL 0 // like NULL, but for indexes, not real pointers
 
-#define DICT_SIZE         128
+#define DICT_SIZE         512
 #define BLOCK_SIZE         64
-#define NUM_LETTERS (0x0F + 1)
 
-#define LETTER_MASK             0x000F
-#define NUM_LETTERS_IN_SAMPLE        4
+#define NUM_LETTERS_IN_SAMPLE        2
+#define LETTER_MASK             0x00FF
+#define LETTER_SIZE_BITS             8
+#define NUM_LETTERS (LETTER_MASK + 1)
 
 #define DELAY() do { \
     uint32_t delay = 0x2ffff; \
@@ -290,8 +291,9 @@ void task_init()
     LOG("init\r\n");
 
     // Initialize the pointer into the dictionary to one of the root nodes
-    letter_t sample = acquire_sample(0);
-    index_t parent = (index_t)sample;
+    // Assume all streams start with a fixed prefix ('0'), to avoid having
+    // to letterize this out-of-band sample.
+    index_t parent = 0;
     CHAN_OUT1(index_t, parent, parent, CH(task_init, task_compress));
 
     LOG("init: start parent %u\r\n", parent);
@@ -354,17 +356,20 @@ void task_sample()
                                     CH(task_init, task_sample),
                                     SELF_IN_CH(task_sample));
 
-    if (letter_idx == NUM_LETTERS_IN_SAMPLE) {
-        letter_idx = 0;
-        CHAN_OUT1(unsigned, letter_idx, letter_idx, SELF_OUT_CH(task_sample));
+    LOG("sample: letter idx %u\r\n", letter_idx);
+
+    CHAN_OUT1(unsigned, letter_idx, letter_idx,
+              CH(task_sample, task_letterize));
+
+    unsigned next_letter_idx = letter_idx + 1;
+    if (next_letter_idx == NUM_LETTERS_IN_SAMPLE)
+        next_letter_idx = 0;
+
+    CHAN_OUT1(unsigned, letter_idx, next_letter_idx, SELF_OUT_CH(task_sample));
+
+    if (letter_idx == 0) {
         TRANSITION_TO(task_measure_temp);
     } else {
-        CHAN_OUT1(unsigned, letter_idx, letter_idx,
-                  CH(task_sample, task_letterize));
-
-        letter_idx++;
-        CHAN_OUT1(unsigned, letter_idx, letter_idx, SELF_OUT_CH(task_sample));
-
         TRANSITION_TO(task_letterize);
     }
 }
@@ -384,7 +389,7 @@ void task_measure_temp()
 #endif
 
     sample_t sample = acquire_sample(prev_sample);
-    LOG("sample: %u\r\n", sample);
+    LOG("measure: %u\r\n", sample);
 
 #ifdef TEST_SAMPLE_DATA
     prev_sample = sample;
@@ -405,9 +410,10 @@ void task_letterize()
     unsigned letter_idx = *CHAN_IN1(unsigned, letter_idx,
                                     CH(task_sample, task_letterize));
 
-    letter_t letter = (sample & (LETTER_MASK << letter_idx)) >> letter_idx;
+    unsigned letter_shift = LETTER_SIZE_BITS * letter_idx;
+    letter_t letter = (sample & (LETTER_MASK << letter_shift)) >> letter_shift;
 
-    LOG("letterize: sample %x letter %x (%u)\r\n", sample, letter);
+    LOG("letterize: sample %x letter %x (%u)\r\n", sample, letter, letter);
 
     CHAN_OUT1(letter_t, letter, letter,
               MC_OUT_CH(ch_letter, task_letterize,
