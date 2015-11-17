@@ -248,15 +248,22 @@ void init()
     GPIO(PORT_LED_3, DIR) |= BIT(PIN_LED_3);
 #endif
 
+#ifdef CONFIG_EDB
+    debug_setup();
+#endif
+
     INIT_CONSOLE();
 
-    __enable_interrupt();
-
-#if defined(PORT_LED_3) // when available, this LED indicates power-on
+    GPIO(PORT_LED_1, DIR) |= BIT(PIN_LED_1);
+    GPIO(PORT_LED_2, DIR) |= BIT(PIN_LED_2);
+#if defined(PORT_LED_3) // inidicates power-on when available
+    GPIO(PORT_LED_3, DIR) |= BIT(PIN_LED_3);
     GPIO(PORT_LED_3, OUT) |= BIT(PIN_LED_3);
 #endif
 
-    PRINTF(".%u.\r\n", curctx->task->idx);
+    __enable_interrupt();
+
+    EIF_PRINTF(".%u.\r\n", curctx->task->idx);
 }
 
 static sample_t acquire_sample(letter_t prev_sample)
