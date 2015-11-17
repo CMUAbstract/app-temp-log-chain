@@ -15,8 +15,8 @@
 
 #define NIL 0 // like NULL, but for indexes, not real pointers
 
-#define DICT_SIZE 128
-#define BLOCK_SIZE 8
+#define DICT_SIZE         128
+#define BLOCK_SIZE         64
 #define NUM_LETTERS (0x0F + 1)
 
 #define DELAY() do { \
