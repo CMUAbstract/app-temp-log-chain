@@ -13,7 +13,7 @@
 
 #include "pins.h"
 
-// #define TEST_SAMPLE_DATA
+#define TEST_SAMPLE_DATA
 
 #define NIL 0 // like NULL, but for indexes, not real pointers
 
