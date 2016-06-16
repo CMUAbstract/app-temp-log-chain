@@ -317,7 +317,7 @@ void task_init()
     CHAN_OUT1(letter_t, letter, letter, CH(task_init, task_init_dict));
 
 #ifdef TEST_SAMPLE_DATA
-    letter_t prev_sample = sample;
+    letter_t prev_sample = 0;
     CHAN_OUT1(letter_t, prev_sample, prev_sample, CH(task_init, task_measure_temp));
 #endif
 
